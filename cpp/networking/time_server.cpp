@@ -21,7 +21,7 @@ std::string current_time();
 std::string get_ipaddr(sockaddr* addr, socklen_t addrlen);
 
 void send_response(SOCKET sock, const std::string& response, int flags = 0);
-
+void run_loop(SOCKET sock);
 
 int main() {
     addrinfo hints;
@@ -78,34 +78,9 @@ int main() {
     if (ipaddr.empty()) return -1;
     else std::cout << "Client connected with address: " << ipaddr << '\n';
 
-    // Wait unti a request is received
-    char request[1025];
-    int bytes_recv = recv(sock_client, request, sizeof(request) - 1, 0);
-    if (bytes_recv < 0) {
-        std::cout << "recv() failed, error: " << GETSOCKERROR() << '\n';
-    }
-    else if (bytes_recv == 0) {
-        std::cout << "Connection closed\n";
-    }
-    else {
-        // Send a response back with current local time
-        request[bytes_recv] = '\0';
-        std::cout << std::string(30, '=') << '\n';
-        std::cout << "Received " << bytes_recv <<" bytes\n";
-        std::cout << "Request:\n" << request << '\n';
-        std::cout << std::string(30, '=') << '\n';
-        
-        const std::string response = 
-            "HTTP/1.1 200 OK\r\n"
-            "Connection: close\r\n"
-            "Content-Type: text/plain\r\n"
-            "\r\n"
-            "Local time is: ";
-        send_response(sock_client, response, 0);
-        send_response(sock_client, current_time(), 0);
-    }
+    run_loop(sock_client);
 
-    // Close the client and serer socket
+    // Close the client and server socket
     std::cout << "Closing connection...\n";
     close(sock_client);
 
@@ -135,5 +110,38 @@ std::string current_time() {
 void send_response(SOCKET sock, const std::string& response, int flags) {
     int bytes_sent = send(sock, response.c_str(), response.size(), flags);
     std::cout << "Sent " << bytes_sent << " of " << response.size() << " bytes.\n";
+}
+
+void run_loop(SOCKET sock) {
+    std::array<char, 1025> buffer;
+    while (true) {
+        int recv_bytes = recv(sock, buffer.data(), buffer.size() - 1, 0);
+        if (recv_bytes == 0) {
+            std::cout << "STAT Connection closed for socket: " << sock << '\n';
+            break;
+        }
+        else if (recv_bytes < 0) {
+            std::cout << "ERR recv() failed for socket: " << sock << " with error: " << GETSOCKERROR() << '\n';
+            continue;
+        }
+
+        std::cout << "STAT received " << recv_bytes << " bytes\n";
+        {
+            buffer[recv_bytes] = '\0';
+            const std::string request = std::string(buffer.data(), recv_bytes);
+            std::cout << "VERB Request received\n";
+            std::cout << std::string(35, '=') << '\n' << request << std::string(35, '=') << '\n';
+
+            const std::string body = "Local time is: " + std::string(current_time());
+            const std::string response = 
+                "HTTP/1.1 200 OK\r\n"
+                "Connection: keep-alive\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: " + std::to_string(body.size()) + "\r\n"
+                "\r\n" +
+                body;
+            send_response(sock, response, 0);
+        }
+    }
 }
 
