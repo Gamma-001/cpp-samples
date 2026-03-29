@@ -121,13 +121,12 @@ void run_loop(SOCKET sock) {
             break;
         }
         else if (recv_bytes < 0) {
-            std::cout << "ERR recv() failed for socket: " << sock << " with error: " << GETSOCKERROR() << '\n';
+            std::cout << "FAIL recv() failed for socket: " << sock << " with error: " << GETSOCKERROR() << '\n';
             continue;
         }
 
         std::cout << "STAT received " << recv_bytes << " bytes\n";
         {
-            buffer[recv_bytes] = '\0';
             const std::string request = std::string(buffer.data(), recv_bytes);
             std::cout << "VERB Request received\n";
             std::cout << std::string(35, '=') << '\n' << request << std::string(35, '=') << '\n';
