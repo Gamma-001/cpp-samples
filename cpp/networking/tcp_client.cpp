@@ -5,24 +5,12 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
-#include <errno.h>
 
 // --- standard libraries
 #include <iostream>
 #include <cstring>
-#include <array>
 
-// --- Macros and typedefs
-
-#define GETSOCKERROR() strerror(errno)
-
-typedef int SOCKET;
-
-template <size_t N>
-using MCSTR = std::array<char, N>;
-
-template <size_t N>
-inline void MCSTR_ZERO(std::array<char, N>& arr) { std::fill(arr.begin(), arr.end(), 0); }
+#include "common.hpp"
 
 // --- main
 
