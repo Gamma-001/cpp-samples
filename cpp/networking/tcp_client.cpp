@@ -30,12 +30,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    MCSTR<100> address_buffer;
-    MCSTR<100> service_buffer;
-    MCSTR_ZERO(address_buffer);
-    MCSTR_ZERO(service_buffer);
-    getnameinfo(peer_address->ai_addr, peer_address->ai_addrlen, address_buffer.data(), address_buffer.size(), service_buffer.data(), service_buffer.size(), NI_NUMERICHOST);
-   
+    auto prstraddr_peer = CPS::getnameinfo(peer_address->ai_addr, peer_address->ai_addrlen, NI_NUMERICHOST);
+    if (prstraddr_peer.first.empty()) return 1;
+
     SOCKET sock_peer = socket(peer_address->ai_family, peer_address->ai_socktype, peer_address->ai_protocol);
     if (sock_peer < 0) {
         std::cerr << "FAIL socket() failed, error: " << GETSOCKERROR() << '\n';
@@ -47,7 +44,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     freeaddrinfo(peer_address);
-    std::cout << "STAT Connected to remote address: " << std::string(address_buffer.data()) << " " << std::string(service_buffer.data()) << '\n';
+    std::cout << "STAT Connected to remote address: " << prstraddr_peer.first << " " << prstraddr_peer.second << '\n';
     std::cout << "STAT Reading data in line mode.\n";
     
     while(true) {

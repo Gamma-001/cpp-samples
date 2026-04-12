@@ -75,10 +75,9 @@ int main() {
                     FD_SET(sock_client, &master);
                     max_socket = std::max(max_socket, sock_client);
 
-                    MCSTR<100> addr_buff;
-                    MCSTR_ZERO(addr_buff);
-                    getnameinfo(reinterpret_cast<sockaddr*>(&client_addr), client_addrlen, addr_buff.data(), addr_buff.size(), 0, 0, NI_NUMERICHOST);
-                    std::cout << "STAT Established connection with " << std::string(addr_buff.data()) << '\n';
+                    auto prstraddr_client = CPS::getnameinfo(reinterpret_cast<sockaddr*>(&client_addr), client_addrlen, NI_NUMERICHOST);
+                    if (prstraddr_client.first.empty()) return 1;
+                    std::cout << "STAT Established connection with " << prstraddr_client.first << '\n';
                 }
                 // client sockets are available with data to be read
                 else {
