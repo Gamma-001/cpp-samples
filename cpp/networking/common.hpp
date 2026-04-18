@@ -13,6 +13,7 @@
 #define GETSOCKERROR() strerror(errno)
 
 typedef int SOCKET;
+typedef SOCKET weak_socket;
 
 constexpr SOCKET SOCKINVL = -1;
 
@@ -100,7 +101,8 @@ public:
         close(); 
     }
 
-    SOCKET get() const noexcept { return m_sock; }
+    weak_socket get() const noexcept { return m_sock; }
+    bool invalid() const noexcept { return m_sock == SOCKINVL; }
     void close() noexcept {
         if (m_sock != SOCKINVL) {
             ::close(m_sock);

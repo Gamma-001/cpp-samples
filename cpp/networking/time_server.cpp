@@ -10,82 +10,79 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
-#include <errno.h>
 
-typedef int SOCKET;
-#define GETSOCKERROR() strerror(errno)
+#include "common.hpp"
 
 constexpr const char* PORT = "8080";
 
 std::string current_time();
 std::string get_ipaddr(sockaddr* addr, socklen_t addrlen);
 
-void send_response(SOCKET sock, const std::string& response, int flags = 0);
-void run_loop(SOCKET sock);
+void send_response(weak_socket sock, const std::string& response, int flags = 0);
+void run_loop(weak_socket sock);
 
 int main() {
-    addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET6;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
+    cps::scoped_socket sock_server;
+    {
+        addrinfo hints;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET6;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_flags = AI_PASSIVE;
 
-    // Poppulate addrinfo list with address matching requested hints
-    addrinfo* bind_address;
-    if (getaddrinfo(0, PORT, &hints, &bind_address) == -1) {
-        std::cout << "getaddrinfo() failed, error: " << GETSOCKERROR() << '\n';
-        return -1;
-    }
+        // Poppulate addrinfo list with address matching requested hints
+        cps::scoped_addrinfo bind_address;
+        if (getaddrinfo(0, PORT, &hints, bind_address.ref()) == -1) {
+            std::cerr << "FAIL getaddrinfo() failed, error: " << GETSOCKERROR() << '\n';
+            return 1;
+        }
 
-    // create a socket to listen for incoming connections
-    SOCKET sock_server;
-    sock_server = socket(bind_address->ai_family, bind_address->ai_socktype, bind_address->ai_protocol);
-    if (sock_server < 0) {
-        std::cout << "Failed to created socket, error: " << GETSOCKERROR() << '\n';
-        return -1;
-    }
+        // create a socket to listen for incoming connections
+        sock_server = socket(bind_address->ai_family, bind_address->ai_socktype, bind_address->ai_protocol);
+        if (sock_server.invalid()) {
+            std::cerr << "FAIL socket() failed, error: " << GETSOCKERROR() << '\n';
+            return 1;
+        }
 
-    // unset IPV6_V6ONLY to support dual stack
-    int option = 0;
-    if (setsockopt(sock_server, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<void*>(&option), sizeof(option))) {  
-        std::cout << "setsockopt() failed, error: " << GETSOCKERROR() << '\n';
-        return -1;
-    }
+        // unset IPV6_V6ONLY to support dual stack
+        int option = 0;
+        if (setsockopt(sock_server.get(), IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<void*>(&option), sizeof(option))) {  
+            std::cerr << "FAIL setsockopt() failed, error: " << GETSOCKERROR() << '\n';
+            return 1;
+        }
 
-    // Associate the socket with the host and port
-    if (bind(sock_server, bind_address->ai_addr, bind_address->ai_addrlen) != 0) {
-        std::cout << "Failed to bind the socket, error: " << GETSOCKERROR() << '\n';
-        return -1;
+        // Associate the socket with the host and port
+        if (bind(sock_server.get (), bind_address->ai_addr, bind_address->ai_addrlen) != 0) {
+            std::cerr << "FAIL bind() failed, error: " << GETSOCKERROR() << '\n';
+            return 1;
+        }
     }
-    freeaddrinfo(bind_address);
 
     // Listen for new connections
-    std::cout << "Listening on port:" << PORT << " (all interfaces) ...\n";
-    if (listen(sock_server, 10) < 0) {
-        std::cout << "listen() failed, error: " << GETSOCKERROR() << '\n';
-        return -1;
+    if (listen(sock_server.get(), 10) < 0) {
+        std::cerr << "FAIL listen() failed, error: " << GETSOCKERROR() << '\n';
+        return 1;
     }
+    std::cout << "STAT Listening on port:" << PORT << " (all interfaces) ...\n";
 
     // Accept a client connection and create a new associated client socket
     sockaddr_storage c_addr;
     socklen_t c_addr_len = sizeof(c_addr);
-    SOCKET sock_client = accept(sock_server, reinterpret_cast<sockaddr*>(&c_addr), &c_addr_len);
-    if (sock_client < 0) {
-        std::cout << "accept(), error: " << GETSOCKERROR() << '\n';
-        return -1;
+    cps::scoped_socket sock_client;
+    sock_client = accept(sock_server.get(), reinterpret_cast<sockaddr*>(&c_addr), &c_addr_len);
+    if (sock_client.invalid()) {
+        std::cerr << "FAIL accept() failed, error: " << GETSOCKERROR() << '\n';
+        return 1;
     }
+
     std::string ipaddr = get_ipaddr(reinterpret_cast<sockaddr*>(&c_addr), c_addr_len);
-    if (ipaddr.empty()) return -1;
-    else std::cout << "Client connected with address: " << ipaddr << '\n';
+    if (ipaddr.empty()) 
+        return -1;
+    else 
+        std::cout << "STAT Client connected with address: " << ipaddr << '\n';
+    run_loop(sock_client.get());
 
-    run_loop(sock_client);
-
-    // Close the client and server socket
-    std::cout << "Closing connection...\n";
-    close(sock_client);
-
-    std::cout << "Closing the listening socket...\n";
-    close(sock_server);
+    std::cout << "STAT Closing connection...\n";
 
     return 0;
 }
@@ -93,7 +90,7 @@ int main() {
 std::string get_ipaddr(sockaddr* addr, socklen_t addrlen) {
     std::array<char, 100> ipaddr;
     if (getnameinfo(addr, addrlen, ipaddr.data(), ipaddr.size(), nullptr, 0, NI_NUMERICHOST) != 0) {
-        std::cout << "getnameinfo() failed, error: " << GETSOCKERROR() << '\n';
+        std::cerr << "FAIL getnameinfo() failed, error: " << GETSOCKERROR() << '\n';
         return "";
     }
 
@@ -107,21 +104,21 @@ std::string current_time() {
     return std::string(std::ctime(&t_c));
 }
 
-void send_response(SOCKET sock, const std::string& response, int flags) {
+void send_response(weak_socket sock, const std::string& response, int flags) {
     int bytes_sent = send(sock, response.c_str(), response.size(), flags);
-    std::cout << "Sent " << bytes_sent << " of " << response.size() << " bytes.\n";
+    std::cout << "STAT Sent " << bytes_sent << " of " << response.size() << " bytes.\n";
 }
 
-void run_loop(SOCKET sock) {
+void run_loop(weak_socket sock) {
     std::array<char, 1025> buffer;
     while (true) {
         int recv_bytes = recv(sock, buffer.data(), buffer.size() - 1, 0);
         if (recv_bytes == 0) {
-            std::cout << "STAT Connection closed for socket: " << sock << '\n';
+            std::cerr << "STAT Connection closed for socket: " << sock << '\n';
             break;
         }
         else if (recv_bytes < 0) {
-            std::cout << "FAIL recv() failed for socket: " << sock << " with error: " << GETSOCKERROR() << '\n';
+            std::cerr << "FAIL recv() failed for socket: " << sock << " with error: " << GETSOCKERROR() << '\n';
             continue;
         }
 
