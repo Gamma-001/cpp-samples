@@ -20,43 +20,67 @@ int main() {
     hints.ai_socktype = SOCK_DGRAM;
     hints.ai_flags = AI_PASSIVE;
 
-    addrinfo* srv_addr;
-    if (getaddrinfo(NULL, PORT, &hints, &srv_addr) != 0) {
-        std::cout << "getaddrinfo() failed, error: " << GETSOCKERROR() << '\n';
-        return 1;
-    }
+    cps::scoped_socket srv_sock;
+    {
+        cps::scoped_addrinfo srv_addr;
+        if (getaddrinfo(NULL, PORT, &hints, srv_addr.ref()) != 0) {
+            std::cerr << "FAIL getaddrinfo() failed, error: " << GETSOCKERROR() << '\n';
+            return 1;
+        }
 
-    SOCKET srv_sock = socket(srv_addr->ai_family, srv_addr->ai_socktype, srv_addr->ai_protocol);
-    if (srv_sock < 0) {
-        std::cout << "socket() failed, error: " << GETSOCKERROR() << '\n';
-        return 1;
-    }
+        srv_sock = socket(srv_addr->ai_family, srv_addr->ai_socktype, srv_addr->ai_protocol);
+        if (srv_sock.get() < 0) {
+            std::cerr << "FAIL socket() failed, error: " << GETSOCKERROR() << '\n';
+            return 1;
+        }
 
-    if (bind(srv_sock, srv_addr->ai_addr, srv_addr->ai_addrlen) != 0) {
-        std::cout << "bind() failed, error: " << GETSOCKERROR() << '\n';
-        return 1;
+        if (bind(srv_sock.get(), srv_addr->ai_addr, srv_addr->ai_addrlen) != 0) {
+            std::cerr << "FAIL bind() failed, error: " << GETSOCKERROR() << '\n';
+            return 1;
+        }
     }
-    freeaddrinfo(srv_addr);
-
-    std::cout << "Listening for incoming data on 0.0.0.0:" << PORT << "...\n";
-
-    sockaddr_storage client_addr;
-    socklen_t client_len = sizeof(sockaddr_storage);
-    MCSTR<1025> read;
-    MCSTR_ZERO(read);
-    int bytes_recv = recvfrom(srv_sock, read.data(), read.size() - 1, 0, reinterpret_cast<sockaddr*>(&client_addr), &client_len);
-    if (bytes_recv < 0) {
-        std::cout << "FAIL recvfrom() failed, error: " << GETSOCKERROR() << '\n';
-        return 1;
-    }
+    std::cout << "STAT Listening for incoming data on 0.0.0.0:" << PORT << "...\n";
     
-    auto prstraddr_client = CPS::getnameinfo(reinterpret_cast<sockaddr*>(&client_addr), client_len);
-    if (prstraddr_client.first.empty()) return 1;
+    fd_set fds_master;
+    FD_ZERO(&fds_master);
+    FD_SET(srv_sock.get(), &fds_master);
+    while (true) {
+        fd_set fds_reads = fds_master;
+        int sret = select(srv_sock.get() + 1, &fds_reads, 0, 0, 0);        
+        if (sret == 0) continue;
+        else if (sret == -1) {
+            std::cerr << "FAIL select() failed, error: " << GETSOCKERROR() << '\n';
+            break;
+        }
 
-    std::cout << "Incoming data from: " << prstraddr_client.first << ":" << prstraddr_client.second << '\n';
-    std::cout << std::string(30, '=') << '\n' << std::string(read.data(), bytes_recv) << '\n' << std::string(30, '=') << '\n';
+        if (FD_ISSET(srv_sock.get(), &fds_reads)) {
+            sockaddr_storage client_addr;
+            socklen_t client_len = sizeof(sockaddr_storage);
+            MCSTR<1025> buff;
+            MCSTR_ZERO(buff);
+            int bytes_recv = recvfrom(srv_sock.get(), buff.data(), buff.size() - 1, 0, reinterpret_cast<sockaddr*>(&client_addr), &client_len);
+            if (bytes_recv < 0) {
+                std::cout << "FAIL recvfrom() failed, error: " << GETSOCKERROR() << '\n';
+                return 1;
+            }
+            
+            auto prstraddr_client = cps::getnameinfo(reinterpret_cast<sockaddr*>(&client_addr), client_len);
+            if (prstraddr_client.first.empty()) return 1;
 
-    close(srv_sock);
+            std::string body = std::string(buff.data(), bytes_recv);
+            std::cout << "STAT Incoming data from: " << prstraddr_client.first << ":" << prstraddr_client.second << '\n';
+            std::cout << std::string(30, '=') << '\n' << body << '\n' << std::string(30, '=') << '\n';
+        
+            std::string response = body;
+            for (auto &x: response) x = std::toupper(static_cast<unsigned char>(x));
+            int bytes_sent = sendto(srv_sock.get(), response.data(), response.size(), 0, reinterpret_cast<const sockaddr*>(&client_addr), client_len);
+            if (bytes_sent < 0) {
+                std::cerr << "FAIL sendto failed, error: " << GETSOCKERROR() << '\n';
+                break;
+            }
+            else std::cout << "STAT sent " << bytes_sent << " bytes of " << response << '\n';
+        } 
+    }
 
     return 0;
 }
